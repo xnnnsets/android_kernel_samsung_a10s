@@ -133,6 +133,11 @@ KBUILD_DTBS	:= dtbs
 
 all:	$(KBUILD_IMAGE) $(KBUILD_DTBS)
 
+MTK_PLATFORM := $(CONFIG_MTK_PLATFORM:"%"=%)
+MTK_PROJECT := $(CONFIG_ARCH_MTK_PROJECT:"%"=%)
+export MTK_PLATFORM MTK_PROJECT MTK_TARGET_PROJECT
+#-include $(srctree)/scripts/drvgen/drvgen.mk
+
 boot := arch/arm64/boot
 
 Image: vmlinux
@@ -144,11 +149,13 @@ Image.%: Image
 zinstall install:
 	$(Q)$(MAKE) $(build)=$(boot) $@
 
-%.dtb: scripts
+#scripts $(DRVGEN_FILE_LIST)
+%.dtb:
 	$(Q)$(MAKE) $(build)=$(boot)/dts $(boot)/dts/$@
 
 PHONY += dtbs dtbs_install
 
+#dtbs: prepare scripts dtbo_check
 dtbs: prepare scripts
 	$(Q)$(MAKE) $(build)=$(boot)/dts
 

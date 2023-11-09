@@ -49,6 +49,8 @@
 #include <asm/sizes.h>
 #include <asm/tlb.h>
 #include <asm/alternative.h>
+#include <linux/cma.h>
+#include <mt-plat/mtk_meminfo.h>
 
 /*
  * We need to be able to catch inadvertent references to memstart_addr
@@ -85,6 +87,12 @@ early_param("initrd", early_initrd);
 static phys_addr_t __init max_zone_dma_phys(void)
 {
 	phys_addr_t offset = memblock_start_of_DRAM() & GENMASK_ULL(63, 32);
+
+#ifdef CONFIG_ZONE_MOVABLE_CMA
+	if (is_zmc_inited())
+		return min(offset + zmc_max_zone_dma_phys,
+				memblock_end_of_DRAM());
+#endif
 	return min(offset + (1ULL << 32), memblock_end_of_DRAM());
 }
 
@@ -108,15 +116,39 @@ static void __init zone_sizes_init(unsigned long min, unsigned long max)
 	struct memblock_region *reg;
 	unsigned long zone_size[MAX_NR_ZONES], zhole_size[MAX_NR_ZONES];
 	unsigned long max_dma = min;
+#ifdef CONFIG_ZONE_MOVABLE_CMA
+	phys_addr_t cma_base, cma_size;
+	unsigned long cma_base_pfn = ULONG_MAX;
+
+	if (is_zmc_inited())
+		zmc_get_range(&cma_base, &cma_size);
+	else
+		cma_get_range(&cma_base, &cma_size);
+
+	if (cma_size)
+		cma_base_pfn = PFN_DOWN(cma_base);
+#endif
 
 	memset(zone_size, 0, sizeof(zone_size));
 
 	/* 4GB maximum for 32-bit only capable devices */
 #ifdef CONFIG_ZONE_DMA
 	max_dma = PFN_DOWN(arm64_dma_phys_limit);
+#ifdef CONFIG_ZONE_MOVABLE_CMA
+	max_dma = min(max_dma, cma_base_pfn);
+#endif
 	zone_size[ZONE_DMA] = max_dma - min;
 #endif
+#ifdef CONFIG_ZONE_MOVABLE_CMA
+	if (cma_size) {
+		zone_size[ZONE_NORMAL] = cma_base_pfn - max_dma;
+		zone_size[ZONE_MOVABLE] = max - cma_base_pfn;
+	} else {
+		zone_size[ZONE_NORMAL] = max - max_dma;
+	}
+#else
 	zone_size[ZONE_NORMAL] = max - max_dma;
+#endif
 
 	memcpy(zhole_size, zone_size, sizeof(zhole_size));
 
@@ -133,11 +165,28 @@ static void __init zone_sizes_init(unsigned long min, unsigned long max)
 			zhole_size[ZONE_DMA] -= dma_end - start;
 		}
 #endif
+#ifdef CONFIG_ZONE_MOVABLE_CMA
+		if (zone_size[ZONE_NORMAL] && end > max_dma &&
+				start < cma_base_pfn) {
+			unsigned long normal_end = min(end, cma_base_pfn);
+			unsigned long normal_start = max(start, max_dma);
+
+			zhole_size[ZONE_NORMAL] -= normal_end - normal_start;
+		}
+
+		if (cma_size && end > cma_base_pfn) {
+			unsigned long movable_end = min(end, max);
+			unsigned long movable_start = max(start, cma_base_pfn);
+
+			zhole_size[ZONE_MOVABLE] -= movable_end - movable_start;
+		}
+#else
 		if (end > max_dma) {
 			unsigned long normal_end = min(end, max);
 			unsigned long normal_start = max(start, max_dma);
 			zhole_size[ZONE_NORMAL] -= normal_end - normal_start;
 		}
+#endif
 	}
 
 	free_area_init_node(0, zone_size, min, zhole_size);
@@ -196,6 +245,7 @@ void __init arm64_memblock_init(void)
 {
 	const s64 linear_region_size = -(s64)PAGE_OFFSET;
 
+	set_memsize_kernel_type(MEMSIZE_KERNEL_STOP);
 	/*
 	 * Ensure that the linear region takes up exactly half of the kernel
 	 * virtual address space. This way, we can distinguish a linear address
@@ -256,9 +306,17 @@ void __init arm64_memblock_init(void)
 			"initrd not fully accessible via the linear mapping -- please check your bootloader ...\n")) {
 			initrd_start = 0;
 		} else {
+			u64 start_up, end_dn, size_al;
+
+			start_up = PAGE_ALIGN(initrd_start);
+			end_dn = initrd_end & PAGE_MASK;
+			size_al = end_dn - start_up;
+
 			memblock_remove(base, size); /* clear MEMBLOCK_ flags */
 			memblock_add(base, size);
 			memblock_reserve(base, size);
+			record_memsize_reserved("initrd", start_up, size_al,
+						false, false);
 		}
 	}
 
@@ -283,7 +341,11 @@ void __init arm64_memblock_init(void)
 	 * Register the kernel text, kernel data, initrd, and initial
 	 * pagetables with memblock.
 	 */
+	set_memsize_kernel_type(MEMSIZE_KERNEL_KERNEL);
 	memblock_reserve(__pa_symbol(_text), _end - _text);
+	set_memsize_kernel_type(MEMSIZE_KERNEL_STOP);
+	record_memsize_reserved("initmem", __pa(__init_begin),
+				__init_end - __init_begin, false, false);
 #ifdef CONFIG_BLK_DEV_INITRD
 	if (initrd_start) {
 		memblock_reserve(initrd_start, initrd_end - initrd_start);
@@ -303,6 +365,7 @@ void __init arm64_memblock_init(void)
 		arm64_dma_phys_limit = PHYS_MASK + 1;
 	high_memory = __va(memblock_end_of_DRAM() - 1) + 1;
 	dma_contiguous_reserve(arm64_dma_phys_limit);
+	set_memsize_kernel_type(MEMSIZE_KERNEL_OTHERS);
 
 	memblock_allow_resize();
 }
@@ -311,6 +374,7 @@ void __init bootmem_init(void)
 {
 	unsigned long min, max;
 
+	set_memsize_kernel_type(MEMSIZE_KERNEL_PAGING);
 	min = PFN_UP(memblock_start_of_DRAM());
 	max = PFN_DOWN(memblock_end_of_DRAM());
 
@@ -329,6 +393,7 @@ void __init bootmem_init(void)
 	zone_sizes_init(min, max);
 
 	memblock_dump_all();
+	set_memsize_kernel_type(MEMSIZE_KERNEL_OTHERS);
 }
 
 #ifndef CONFIG_SPARSEMEM_VMEMMAP

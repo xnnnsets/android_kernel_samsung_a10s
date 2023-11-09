@@ -1,7 +1,6 @@
-dtb-$(CONFIG_ARCH_MEDIATEK) += mt6755-evb.dtb
-dtb-$(CONFIG_ARCH_MEDIATEK) += mt6795-evb.dtb
-dtb-$(CONFIG_ARCH_MEDIATEK) += mt8173-evb.dtb
+# SPDX-License-Identifier: GPL-2.0
+dtb-y += mt6765.dtb
+dtb-y += mt6765_a10s_eur_open_00.dtb
 
-always		:= $(dtb-y)
-subdir-y	:= $(dts-dirs)
-clean-files	:= *.dtb
+always            := $(dtb-y)
+clean-files       := *.dtb*

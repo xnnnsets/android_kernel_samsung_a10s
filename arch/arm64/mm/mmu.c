@@ -43,6 +43,7 @@
 #include <asm/tlb.h>
 #include <asm/memblock.h>
 #include <asm/mmu_context.h>
+#include <mt-plat/mtk_meminfo.h>
 
 u64 idmap_t0sz = TCR_T0SZ(VA_BITS);
 
@@ -183,6 +184,17 @@ static inline bool use_1G_block(unsigned long addr, unsigned long next,
 
 	if (((addr | next | phys) & ~PUD_MASK) != 0)
 		return false;
+#ifdef CONFIG_MTK_SSMR
+	/*
+	 * SSMR will unmapping memory region which shared with kernel
+	 * and SVP to prevent illegal fetch of EMI MPU Violation.
+	 * Return false to make all memory become pmd mapping.
+	 */
+	if (memory_ssmr_inited()) {
+		pr_info("%s, memory-ssmr inited\n", __func__);
+		return false;
+	}
+#endif
 
 	return true;
 }
@@ -496,8 +508,12 @@ static void __init map_kernel(pgd_t *pgd)
  */
 void __init paging_init(void)
 {
-	phys_addr_t pgd_phys = early_pgtable_alloc();
-	pgd_t *pgd = pgd_set_fixmap(pgd_phys);
+	phys_addr_t pgd_phys;
+	pgd_t *pgd;
+
+	set_memsize_kernel_type(MEMSIZE_KERNEL_PAGING);
+	pgd_phys = early_pgtable_alloc();
+	pgd = pgd_set_fixmap(pgd_phys);
 
 	map_kernel(pgd);
 	map_mem(pgd);
@@ -523,6 +539,7 @@ void __init paging_init(void)
 	 */
 	memblock_free(__pa_symbol(swapper_pg_dir) + PAGE_SIZE,
 		      SWAPPER_DIR_SIZE - PAGE_SIZE);
+	set_memsize_kernel_type(MEMSIZE_KERNEL_OTHERS);
 }
 
 /*
