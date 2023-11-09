@@ -1621,7 +1621,11 @@ struct dentry *__d_alloc(struct super_block *sb, const struct qstr *name)
 		dname = p->name;
 		if (IS_ENABLED(CONFIG_DCACHE_WORD_ACCESS))
 			kasan_unpoison_shadow(dname,
-				round_up(name->len + 1,	sizeof(unsigned long)));
+#if defined(CONFIG_KASAN) && defined(CONFIG_KASAN_ENHANCEMENT)
+				round_up(name->len + 1,	16));
+#else
+				round_up(name->len + 1, sizeof(unsigned long)));
+#endif
 	} else  {
 		dname = dentry->d_iname;
 	}	
@@ -3669,8 +3673,10 @@ EXPORT_SYMBOL(d_genocide);
 
 void __init vfs_caches_init_early(void)
 {
+	set_memsize_kernel_type(MEMSIZE_KERNEL_VFSHASH);
 	dcache_init_early();
 	inode_init_early();
+	set_memsize_kernel_type(MEMSIZE_KERNEL_OTHERS);
 }
 
 void __init vfs_caches_init(void)

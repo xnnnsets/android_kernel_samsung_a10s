@@ -44,8 +44,17 @@
 #include <linux/hardirq.h>
 #include <linux/jiffies.h>
 #include <linux/workqueue.h>
+#include <linux/io.h>
+#include <linux/sec_debug.h>
 
 #include "internal.h"
+
+#ifdef __aarch64__
+#ifdef memcpy
+#undef memcpy
+#endif
+#define memcpy memcpy_toio
+#endif
 
 /*
  * We defer making "oops" entries appear in pstore - see
@@ -567,6 +576,7 @@ static void pstore_unregister_kmsg(void)
 }
 
 #ifdef CONFIG_PSTORE_CONSOLE
+/*
 static void pstore_console_write(struct console *con, const char *s, unsigned c)
 {
 	const char *e = s + c;
@@ -591,10 +601,31 @@ static void pstore_console_write(struct console *con, const char *s, unsigned c)
 		c = e - s;
 	}
 }
+*/
+
+static void pstore_simp_console_write(struct console *con, const char *s,
+		unsigned int c)
+{
+	u64 id;
+	bool compressed = false;
+
+	psinfo->write_buf(PSTORE_TYPE_CONSOLE, 0, &id, 0, s, compressed, c,
+			psinfo);
+}
+
+void pstore_bconsole_write(struct console *con, const char *s, unsigned int c)
+{
+	u64 id;
+	bool compressed = false;
+
+	if (psinfo)
+		psinfo->write_buf(PSTORE_TYPE_CONSOLE, 1, &id, 0, s, compressed,
+				c, psinfo);
+}
 
 static struct console pstore_console = {
 	.name	= "pstore",
-	.write	= pstore_console_write,
+	.write	= pstore_simp_console_write,
 	.flags	= CON_PRINTBUFFER | CON_ENABLED | CON_ANYTIME,
 	.index	= -1,
 };
@@ -647,6 +678,9 @@ static int pstore_write_buf_user_compat(enum pstore_type_id type,
 			ret = -EFAULT;
 			break;
 		}
+#ifdef CONFIG_SEC_LOG_HOOK_PMSG		
+		sec_log_hook_pmsg(psinfo->buf, c);
+#endif
 		ret = psi->write_buf(type, reason, id, part, psinfo->buf,
 				     compressed, c, psi);
 		if (unlikely(ret < 0))
