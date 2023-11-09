@@ -1308,7 +1308,7 @@ static int check_version(Elf_Shdr *sechdrs,
 bad_version:
 	pr_warn("%s: disagrees about version of symbol %s\n",
 	       mod->name, symname);
-	return 0;
+	return 1;
 }
 
 static inline int check_modstruct_version(Elf_Shdr *sechdrs,
@@ -2981,7 +2981,7 @@ static int check_modinfo(struct module *mod, struct load_info *info, int flags)
 		modmagic = NULL;
 
 	/* This is allowed: modprobe --force will invalidate it. */
-	if (!modmagic) {
+	/* if (!modmagic) {
 		err = try_to_force_load(mod, "bad vermagic");
 		if (err)
 			return err;
@@ -2989,7 +2989,7 @@ static int check_modinfo(struct module *mod, struct load_info *info, int flags)
 		pr_err("%s: version magic '%s' should be '%s'\n",
 		       mod->name, modmagic, vermagic);
 		return -ENOEXEC;
-	}
+	} */
 
 	if (!get_modinfo(info, "intree")) {
 		if (!test_taint(TAINT_OOT_MODULE))
@@ -4319,12 +4319,67 @@ void print_modules(void)
 	list_for_each_entry_rcu(mod, &modules, list) {
 		if (mod->state == MODULE_STATE_UNFORMED)
 			continue;
+#if 0
 		pr_cont(" %s%s", mod->name, module_flags(mod, buf));
+#else
+		pr_cont(" %s %px %px %d %d %s",
+			mod->name,
+			mod->core_layout.base,
+			mod->init_layout.base,
+			mod->core_layout.size,
+			mod->init_layout.size,
+			module_flags(mod, buf));
+#endif
 	}
 	preempt_enable();
 	if (last_unloaded_module[0])
 		pr_cont(" [last unloaded: %s]", last_unloaded_module);
 	pr_cont("\n");
+}
+
+int __weak do_translation_fault_preconditioner(unsigned long addr)
+{
+	return -1;
+}
+
+/* MUST ensure called when preempt disabled already */
+int save_modules(char *mbuf, int mbufsize)
+{
+	struct module *mod;
+	char buf[8];
+	/*int off = 0;*/
+	int sz = 0;
+
+	if (mbuf == NULL || mbufsize <= 0) {
+		pr_cont("mrdump: module info buffer wrong(sz:%d)\n", mbufsize);
+		return 0;
+	}
+
+	memset(mbuf, '\0', mbufsize);
+	sz += snprintf(mbuf + sz, mbufsize - sz, "Modules linked in:");
+	list_for_each_entry_rcu(mod, &modules, list) {
+		do_translation_fault_preconditioner((unsigned long)mod);
+		if (mod->state == MODULE_STATE_UNFORMED)
+			continue;
+		if (sz >= mbufsize) {
+			pr_cont("mrdump: module info buffer full(sz:%d)\n",
+				mbufsize);
+			break;
+		}
+		sz += snprintf(mbuf + sz, mbufsize - sz, " %s %px %px %d %d %s",
+				mod->name,
+				mod->core_layout.base,
+				mod->init_layout.base,
+				mod->core_layout.size,
+				mod->init_layout.size,
+				module_flags(mod, buf));
+	}
+	if (last_unloaded_module[0] && sz < mbufsize)
+		sz += snprintf(mbuf + sz, mbufsize - sz, " [last unloaded: %s]",
+				last_unloaded_module);
+	if (sz < mbufsize)
+		sz += snprintf(mbuf + sz, mbufsize - sz, "\n");
+	return sz;
 }
 
 #ifdef CONFIG_MODVERSIONS

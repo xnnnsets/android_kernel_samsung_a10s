@@ -26,6 +26,13 @@
 #include <linux/nmi.h>
 #include <linux/console.h>
 #include <linux/bug.h>
+#ifdef CONFIG_SEC_DEBUG
+#include <linux/sec_debug.h>
+
+DECLARE_PER_CPU(unsigned char, coreregs_stored);
+DECLARE_PER_CPU(struct pt_regs, sec_aarch64_core_reg);
+DECLARE_PER_CPU(sec_debug_mmu_reg_t, sec_aarch64_mmu_reg);
+#endif
 
 #define PANIC_TIMER_STEP 100
 #define PANIC_BLINK_SPD 18
@@ -136,6 +143,12 @@ void panic(const char *fmt, ...)
 	int state = 0;
 	int old_cpu, this_cpu;
 	bool _crash_kexec_post_notifiers = crash_kexec_post_notifiers;
+#ifdef CONFIG_SEC_DEBUG_EXTRA_INFO
+	struct pt_regs regs;
+
+	regs.regs[30] = _RET_IP_;
+	regs.pc = regs.regs[30] - sizeof(unsigned int);
+#endif
 
 	/*
 	 * Disable local interrupts. This will prevent panic_smp_self_stop
@@ -171,7 +184,22 @@ void panic(const char *fmt, ...)
 	va_start(args, fmt);
 	vsnprintf(buf, sizeof(buf), fmt, args);
 	va_end(args);
+	
+#ifdef CONFIG_SEC_DEBUG_AUTO_COMMENT
+	if (buf[strlen(buf) - 1] == '\n')
+		buf[strlen(buf) - 1] = '\0';
+#endif
+
+#ifdef CONFIG_SEC_DEBUG_EXTRA_INFO
+	sec_debug_set_extra_info_fault((unsigned long)regs.pc, &regs);
+#endif
+
+#ifdef CONFIG_SEC_DEBUG_AUTO_COMMENT
+	pr_auto(ASL5, "Kernel panic - not syncing: %s\n", buf);
+#else
 	pr_emerg("Kernel panic - not syncing: %s\n", buf);
+#endif
+
 #ifdef CONFIG_DEBUG_BUGVERBOSE
 	/*
 	 * Avoid nested stack-dumping if a panic occurs during oops processing
@@ -206,6 +234,15 @@ void panic(const char *fmt, ...)
 		 */
 		crash_smp_send_stop();
 	}
+
+#ifdef CONFIG_SEC_DEBUG
+	if (!__this_cpu_read(coreregs_stored)) {
+		sec_debug_save_mmu_reg(&per_cpu(sec_aarch64_mmu_reg, smp_processor_id()));
+		sec_debug_save_core_reg(NULL);
+		__this_cpu_inc(coreregs_stored);
+		pr_emerg("context saved(CPU:%d)[%s,%d]\n", smp_processor_id(), __func__, __LINE__);
+	}
+#endif
 
 	/*
 	 * Run any panic handlers, including those that might need to
@@ -599,8 +636,11 @@ EXPORT_SYMBOL(warn_slowpath_null);
  */
 __visible void __stack_chk_fail(void)
 {
+/*
 	panic("stack-protector: Kernel stack is corrupted in: %pB\n",
 		__builtin_return_address(0));
+*/
+	BUG();
 }
 EXPORT_SYMBOL(__stack_chk_fail);
 
