@@ -26,6 +26,12 @@
 #include "sdio_cis.h"
 #include "bus.h"
 
+#ifdef CONFIG_MMC_SUPPORT_STLOG
+#include <linux/fslog.h>
+#else
+#define ST_LOG(fmt,...)
+#endif
+
 #define to_mmc_driver(d)	container_of(d, struct mmc_driver, drv)
 
 static ssize_t type_show(struct device *dev,
@@ -152,12 +158,18 @@ static int mmc_bus_suspend(struct device *dev)
 
 	ret = pm_generic_suspend(dev);
 	if (ret)
-		return ret;
+		goto out;
 
 	ret = host->bus_ops->suspend(host);
-	if (ret)
+	/*
+	 * Resume subsytem when suspend failed.
+	 */
+	if (ret) {
+		pr_info("%s: error %d during suspend\n",
+			mmc_hostname(host), ret);
 		pm_generic_resume(dev);
-
+	}
+out:
 	return ret;
 }
 
@@ -344,6 +356,16 @@ int mmc_add_card(struct mmc_card *card)
 			mmc_card_hs400es(card) ? "Enhanced strobe " : "",
 			mmc_card_ddr52(card) ? "DDR " : "",
 			uhs_bus_speed_mode, type, card->rca);
+		ST_LOG("%s: new %s%s%s%s%s%s card at address %04x(clk %u)\n",
+			mmc_hostname(card->host),
+			mmc_card_uhs(card) ? "ultra high speed " :
+			(mmc_card_hs(card) ? "high speed " : ""),
+			mmc_card_hs400(card) ? "HS400 " :
+			(mmc_card_hs200(card) ? "HS200 " : ""),
+			mmc_card_hs400es(card) ? "Enhanced strobe " : "",
+			mmc_card_ddr52(card) ? "DDR " : "",
+			uhs_bus_speed_mode, type, card->rca,
+			card->host->ios.clock);
 	}
 
 #ifdef CONFIG_DEBUG_FS
@@ -380,6 +402,8 @@ void mmc_remove_card(struct mmc_card *card)
 				mmc_hostname(card->host));
 		} else {
 			pr_info("%s: card %04x removed\n",
+				mmc_hostname(card->host), card->rca);
+			ST_LOG("%s: card %04x removed\n",
 				mmc_hostname(card->host), card->rca);
 		}
 		device_del(&card->dev);

@@ -43,13 +43,16 @@ static struct device_attribute power_supply_attrs[];
 static ssize_t power_supply_show_property(struct device *dev,
 					  struct device_attribute *attr,
 					  char *buf) {
+	//+Bug492300,lili5.wt,MODIFY,20191021,OTG status
 	static char *type_text[] = {
 		"Unknown", "Battery", "UPS", "Mains", "USB",
-		"USB_DCP", "USB_CDP", "USB_ACA", "USB_C",
-		"USB_PD", "USB_PD_DRP"
+		"USB_DCP", "USB_CDP", "USB_ACA", "Wireless", "USB_C",
+		"USB_PD", "USB_PD_DRP", "OTG"
 	};
+	//-Bug492300,lili5.wt,MODIFY,20191021,OTG status
 	static char *status_text[] = {
-		"Unknown", "Charging", "Discharging", "Not charging", "Full"
+		"Unknown", "Charging", "Discharging", "Not charging", "Full",
+		"Cmd discharging"
 	};
 	static char *charge_type[] = {
 		"Unknown", "N/A", "Trickle", "Fast"
@@ -106,6 +109,14 @@ static ssize_t power_supply_show_property(struct device *dev,
 		return sprintf(buf, "%s\n", scope_text[value.intval]);
 	else if (off >= POWER_SUPPLY_PROP_MODEL_NAME)
 		return sprintf(buf, "%s\n", value.strval);
+	//+Bug492297,lili5.wt,ADD,20191021,charging type report,Fast or Slow
+	else if (off == POWER_SUPPLY_PROP_NEW_CHARGE_TYPE)
+		return sprintf(buf, "%s\n", value.strval);
+	//-Bug492297,lili5.wt,ADD,20191021,charging type report,Fast or Slow
+	//+Bug495355,lili5.wt,ADD,20191109,charging type report
+	else if (off == POWER_SUPPLY_PROP_REAL_TYPE)
+		return sprintf(buf, "%s\n", value.strval);
+	//-Bug495355,lili5.wt,ADD,20191109,charging type report
 
 	if (off == POWER_SUPPLY_PROP_CHARGE_COUNTER_EXT)
 		return sprintf(buf, "%lld\n", value.int64val);
@@ -121,6 +132,15 @@ static ssize_t power_supply_store_property(struct device *dev,
 	const ptrdiff_t off = attr - power_supply_attrs;
 	union power_supply_propval value;
 	long long_val;
+	//+Bug492295,lili5.wt,MODIFY,20191021,battery capacity control in demo mode
+	int x = 0;
+
+	if (off == POWER_SUPPLY_PROP_STORE_MODE) {
+	 if (sscanf(buf, "%10d\n", &x) == 1) {
+	  pr_err("#### power_supply_store_property x(%d)\n", x );
+	  value.intval = x;
+	 }
+	} else {
 
 	/* TODO: support other types than int */
 	ret = kstrtol(buf, 10, &long_val);
@@ -128,7 +148,8 @@ static ssize_t power_supply_store_property(struct device *dev,
 		return ret;
 
 	value.intval = long_val;
-
+	}
+	//-Bug492295,lili5.wt,MODIFY,20191021,battery capacity control in demo mode
 	ret = power_supply_set_property(psy, off, &value);
 	if (ret < 0)
 		return ret;
@@ -201,6 +222,38 @@ static struct device_attribute power_supply_attrs[] = {
 	POWER_SUPPLY_ATTR(scope),
 	POWER_SUPPLY_ATTR(charge_term_current),
 	POWER_SUPPLY_ATTR(calibrate),
+	POWER_SUPPLY_ATTR(typec_cc_orientation),
+	//+Bug 518556,liuyong3.wt,ADD,20191128,Charging afc flag
+#ifdef CONFIG_MT6370_PMU_CHARGER
+	POWER_SUPPLY_ATTR(afc_flag),
+#endif
+	//-Bug 518556,liuyong3.wt,ADD,20191128,Charging afc flag
+	//+Bug492302,lili5.wt,ADD,20191021,battery misc event
+	POWER_SUPPLY_ATTR(batt_misc_event),
+	//-Bug492302,lili5.wt,ADD,20191021,battery misc event
+	//+Bug492303,lili5.wt,ADD,20191021,battery Current Consumption
+	POWER_SUPPLY_ATTR(batt_current_ua_now),
+	//-Bug492303,lili5.wt,ADD,20191021,battery Current Consumption
+	//+Bug492299,lili5.wt,ADD,20191021,battery Current event and slate mode
+	POWER_SUPPLY_ATTR(batt_slate_mode),
+	POWER_SUPPLY_ATTR(batt_current_event),
+	//-Bug492299,lili5.wt,ADD,20191021,battery Current event and slate mode
+	//+Bug492298,lili5.wt,ADD,20191021,hv charger status
+	POWER_SUPPLY_ATTR(hv_charger_status),
+	//+Bug492298,lili5.wt,ADD,20191021,hv charger status
+	//+Bug492295,lili5.wt,ADD,20191021,battery capacity control in demo mode
+	POWER_SUPPLY_ATTR(store_mode),
+	//-Bug492295,lili5.wt,ADD,20191021,battery capacity control in demo mode
+	//+ SS_charging, add battery_cycle node
+	POWER_SUPPLY_ATTR(battery_cycle),
+	//- SS_charging, add battery_cycle node
+	//+Bug492297,lili5.wt,ADD,20191021,charging type report,Fast or Slow
+	POWER_SUPPLY_ATTR(new_charge_type),
+	//-Bug492297,lili5.wt,ADD,20191021,charging type report,Fast or Slow
+	//+Bug495355,lili5.wt,ADD,20191109,charging type report
+	POWER_SUPPLY_ATTR(real_type),
+	//-Bug495355,lili5.wt,ADD,20191109,charging type report
+	POWER_SUPPLY_ATTR(hv_disable),
 	/* Local extensions */
 	POWER_SUPPLY_ATTR(usb_hc),
 	POWER_SUPPLY_ATTR(usb_otg),

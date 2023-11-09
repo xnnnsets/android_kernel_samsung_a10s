@@ -835,5 +835,35 @@ config INPUT_HISI_POWERKEY
 
 	  To compile this driver as a module, choose M here: the
 	  module will be called hisi_powerkey.
+config CONFIG_INPUT_HALL
+	tristate "hall sensor support"
+	depends on INPUT
+	help
+	Say Y to enable support for hall sensor.
+source "drivers/input/misc/hall/Kconfig"
+
+config INPUT_ABOV_2CH
+       tristate "ABOV_SAR_sensor"
+       depends on I2C
+       default n
+       help
+         Say Y to enable the SAR detection application, if N here not to use the
+         this SAR sensor
+
+config INPUT_ABOV_3CH
+       tristate "ABOV_SAR_sensor"
+       depends on I2C
+       default n
+       help
+         Say Y to enable the SAR detection application, if N here not to use the
+         this SAR sensor
+         
+config INPUT_ABOV
+       tristate "ABOV_SAR_sensor"
+       depends on I2C
+       default n
+       help
+         Say Y to enable the SAR detection application, if N here not to use the
+         this SAR sensor
 
 endif

@@ -1875,6 +1875,16 @@ void fb_set_suspend(struct fb_info *info, int state)
 }
 EXPORT_SYMBOL(fb_set_suspend);
 
+int fb_lcm_cabc_op(struct fb_info *info, unsigned int cmd, unsigned long arg)
+{
+	int err;
+
+	err = do_fb_ioctl(info, cmd, arg);
+
+	return err;
+}
+EXPORT_SYMBOL(fb_lcm_cabc_op);
+
 /**
  *	fbmem_init - init frame buffer subsystem
  *
