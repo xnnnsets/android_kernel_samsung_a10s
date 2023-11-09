@@ -84,6 +84,11 @@
 unsigned long max_mapnr;
 struct page *mem_map;
 
+#ifdef CONFIG_MTK_MEMCFG
+unsigned long mem_map_size;
+EXPORT_SYMBOL(mem_map_size);
+#endif
+
 EXPORT_SYMBOL(max_mapnr);
 EXPORT_SYMBOL(mem_map);
 #endif
@@ -2554,7 +2559,8 @@ int do_swap_page(struct fault_env *fe, pte_t orig_pte)
 	page = lookup_swap_cache(entry);
 	if (!page) {
 		page = swapin_readahead(entry,
-					GFP_HIGHUSER_MOVABLE, vma, fe->address);
+					GFP_HIGHUSER_MOVABLE | __GFP_CMA,
+					vma, fe->address);
 		if (!page) {
 			/*
 			 * Back out if somebody else faulted in this pte
@@ -3060,8 +3066,13 @@ int alloc_set_pte(struct fault_env *fe, struct mem_cgroup *memcg,
 	return 0;
 }
 
+#ifdef CONFIG_FAULT_AROUND_4KB
+static unsigned long fault_around_bytes __read_mostly =
+	rounddown_pow_of_two(4096);
+#else
 static unsigned long fault_around_bytes __read_mostly =
 	rounddown_pow_of_two(65536);
+#endif
 
 #ifdef CONFIG_DEBUG_FS
 static int fault_around_bytes_get(void *data, u64 *val)

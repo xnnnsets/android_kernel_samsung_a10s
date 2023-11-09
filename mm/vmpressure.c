@@ -23,6 +23,7 @@
 #include <linux/swap.h>
 #include <linux/printk.h>
 #include <linux/vmpressure.h>
+#include <mt-plat/mtk_memcfg.h>
 
 /*
  * The window size (vmpressure_win) is the number of scanned pages before
@@ -38,7 +39,7 @@
  * TODO: Make the window size depend on machine size, as we do for vmstat
  * thresholds. Currently we set it to 512 pages (2MB for 4KB pages).
  */
-static const unsigned long vmpressure_win = SWAP_CLUSTER_MAX * 16;
+unsigned long vmpressure_win = SWAP_CLUSTER_MAX * 16;
 
 /*
  * These thresholds are used when we account memory pressure through
@@ -46,8 +47,8 @@ static const unsigned long vmpressure_win = SWAP_CLUSTER_MAX * 16;
  * essence, they are percents: the higher the value, the more number
  * unsuccessful reclaims there were.
  */
-static const unsigned int vmpressure_level_med = 60;
-static const unsigned int vmpressure_level_critical = 95;
+unsigned int vmpressure_level_med = CONFIG_VMPRESSURE_LEVEL_MED;
+unsigned int vmpressure_level_critical = 95;
 
 /*
  * When there are too little pages left to scan, vmpressure() may miss the
@@ -109,7 +110,7 @@ static enum vmpressure_levels vmpressure_level(unsigned long pressure)
 }
 
 static enum vmpressure_levels vmpressure_calc_level(unsigned long scanned,
-						    unsigned long reclaimed)
+						    unsigned long reclaimed, struct vmpressure *vmpr)
 {
 	unsigned long scale = scanned + reclaimed;
 	unsigned long pressure = 0;
@@ -130,6 +131,7 @@ static enum vmpressure_levels vmpressure_calc_level(unsigned long scanned,
 	 */
 	pressure = scale - (reclaimed * scale / scanned);
 	pressure = pressure * 100 / scale;
+	vmpr->pressure = pressure;
 
 out:
 	pr_debug("%s: %3lu  (s: %lu  r: %lu)\n", __func__, pressure,
@@ -149,6 +151,10 @@ static bool vmpressure_event(struct vmpressure *vmpr,
 {
 	struct vmpressure_event *ev;
 	bool signalled = false;
+
+#ifdef CONFIG_MTK_ENG_BUILD
+	mtk_memcfg_inform_vmpressure();
+#endif
 
 	mutex_lock(&vmpr->events_lock);
 
@@ -191,7 +197,7 @@ static void vmpressure_work_fn(struct work_struct *work)
 	vmpr->tree_reclaimed = 0;
 	spin_unlock(&vmpr->sr_lock);
 
-	level = vmpressure_calc_level(scanned, reclaimed);
+	level = vmpressure_calc_level(scanned, reclaimed, vmpr);
 
 	do {
 		if (vmpressure_event(vmpr, level))
@@ -280,7 +286,7 @@ void vmpressure(gfp_t gfp, struct mem_cgroup *memcg, bool tree,
 		vmpr->scanned = vmpr->reclaimed = 0;
 		spin_unlock(&vmpr->sr_lock);
 
-		level = vmpressure_calc_level(scanned, reclaimed);
+		level = vmpressure_calc_level(scanned, reclaimed, vmpr);
 
 		if (level > VMPRESSURE_LOW) {
 			/*

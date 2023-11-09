@@ -39,6 +39,13 @@
 #include <linux/init.h>
 #include <linux/mmu_notifier.h>
 
+#ifdef CONFIG_MTK_ION
+#include "mtk/ion_drv.h"
+#endif
+#ifdef CONFIG_MTK_GPU_SUPPORT
+#include <mt-plat/mtk_gpu_utility.h>
+#endif
+
 #include <asm/tlb.h>
 #include "internal.h"
 
@@ -369,12 +376,22 @@ static void select_bad_process(struct oom_control *oc)
  * State information includes task's pid, uid, tgid, vm size, rss, nr_ptes,
  * swapents, oom_score_adj value, and name.
  */
-static void dump_tasks(struct mem_cgroup *memcg, const nodemask_t *nodemask)
+void dump_tasks(struct mem_cgroup *memcg, const nodemask_t *nodemask)
 {
 	struct task_struct *p;
 	struct task_struct *task;
 
+#if defined(CONFIG_SWAP)
+	unsigned long swap_orig_nrpages;
+	unsigned long swap_comp_nrpages;
+	unsigned long task_swap;
+
+	swap_orig_nrpages = get_swap_orig_data_nrpages();
+	swap_comp_nrpages = get_swap_comp_pool_nrpages();
+	pr_info("[ pid ]   uid  tgid total_vm total_rss (   rss     swap  ) nr_ptes nr_pmds swapents oom_score_adj name\n");
+#else
 	pr_info("[ pid ]   uid  tgid total_vm      rss nr_ptes nr_pmds swapents oom_score_adj name\n");
+#endif
 	rcu_read_lock();
 	for_each_process(p) {
 		if (oom_unkillable_task(p, memcg, nodemask))
@@ -390,9 +407,21 @@ static void dump_tasks(struct mem_cgroup *memcg, const nodemask_t *nodemask)
 			continue;
 		}
 
+#if defined(CONFIG_SWAP)
+		task_swap = get_mm_counter(task->mm, MM_SWAPENTS) *
+				swap_comp_nrpages / swap_orig_nrpages;
+		pr_info("[%5d] %5d %5d %8lu  %8lu (%8lu %8lu) %7ld %7ld %8lu         %5hd %s\n",
+#else
 		pr_info("[%5d] %5d %5d %8lu %8lu %7ld %7ld %8lu         %5hd %s\n",
+#endif
 			task->pid, from_kuid(&init_user_ns, task_uid(task)),
-			task->tgid, task->mm->total_vm, get_mm_rss(task->mm),
+			task->tgid, task->mm->total_vm,
+#if defined(CONFIG_SWAP)
+			get_mm_rss(task->mm) + task_swap,
+			get_mm_rss(task->mm), task_swap,
+#else
+			get_mm_rss(task->mm),
+#endif
 			atomic_long_read(&task->mm->nr_ptes),
 			mm_nr_pmds(task->mm),
 			get_mm_counter(task->mm, MM_SWAPENTS),
@@ -400,6 +429,24 @@ static void dump_tasks(struct mem_cgroup *memcg, const nodemask_t *nodemask)
 		task_unlock(task);
 	}
 	rcu_read_unlock();
+}
+
+/* show tasks' memory usage */
+void show_task_mem(void)
+{
+	dump_tasks(NULL, NULL);
+}
+
+/* dump extra info: HW memory usage */
+void oom_dump_extra_info(void)
+{
+#ifdef CONFIG_MTK_ION
+	ion_mm_heap_memory_detail();
+#endif
+#ifdef CONFIG_MTK_GPU_SUPPORT
+	if (mtk_dump_gpu_memory_usage() == false)
+		pr_info("mtk_dump_gpu_memory_usage not support\n");
+#endif
 }
 
 static void dump_header(struct oom_control *oc, struct task_struct *p)
@@ -417,10 +464,14 @@ static void dump_header(struct oom_control *oc, struct task_struct *p)
 	dump_stack();
 	if (oc->memcg)
 		mem_cgroup_print_oom_info(oc->memcg, p);
-	else
+	else {
+		show_mem_extra_call_notifiers();
 		show_mem(SHOW_MEM_FILTER_NODES);
+	}
 	if (sysctl_oom_dump_tasks)
 		dump_tasks(oc->memcg, oc->nodemask);
+
+	oom_dump_extra_info();
 }
 
 /*
@@ -1063,6 +1114,9 @@ bool out_of_memory(struct oom_control *oc)
 	/* Found nothing?!?! Either we hang forever, or we panic. */
 	if (!oc->chosen && !is_sysrq_oom(oc) && !is_memcg_oom(oc)) {
 		dump_header(oc, NULL);
+#ifdef CONFIG_PAGE_OWNER
+		print_max_page_owner();
+#endif
 		panic("Out of memory and no killable processes...\n");
 	}
 	if (oc->chosen && oc->chosen != (void *)-1UL) {

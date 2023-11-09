@@ -53,6 +53,8 @@
 #include <linux/mount.h>
 #include <linux/migrate.h>
 #include <linux/pagemap.h>
+#include <linux/swap.h>
+#include <linux/jiffies.h>
 
 #define ZSPAGE_MAGIC	0x58
 
@@ -113,7 +115,12 @@
  */
 #define OBJ_ALLOCATED_TAG 1
 #define OBJ_TAG_BITS 1
+#if BITS_PER_LONG == 32
+/* minus 1 bit for large DRAM (>3GB) */
+#define OBJ_INDEX_BITS	(BITS_PER_LONG - _PFN_BITS - OBJ_TAG_BITS - 1)
+#else
 #define OBJ_INDEX_BITS	(BITS_PER_LONG - _PFN_BITS - OBJ_TAG_BITS)
+#endif
 #define OBJ_INDEX_MASK	((_AC(1, UL) << OBJ_INDEX_BITS) - 1)
 
 #define MAX(a, b) ((a) >= (b) ? (a) : (b))
@@ -761,7 +768,7 @@ static void insert_zspage(struct size_class *class,
 {
 	struct zspage *head;
 
-	zs_stat_inc(class, fullness, 1);
+	zs_stat_inc(class, (enum zs_stat_type)fullness, 1);
 	head = list_first_entry_or_null(&class->fullness_list[fullness],
 					struct zspage, list);
 	/*
@@ -789,7 +796,7 @@ static void remove_zspage(struct size_class *class,
 	VM_BUG_ON(is_zspage_isolated(zspage));
 
 	list_del_init(&zspage->list);
-	zs_stat_dec(class, fullness, 1);
+	zs_stat_dec(class, (enum zs_stat_type)fullness, 1);
 }
 
 /*
@@ -2370,6 +2377,9 @@ static unsigned long zs_shrinker_scan(struct shrinker *shrinker,
 	return pages_freed ? pages_freed : SHRINK_STOP;
 }
 
+#define ZS_SHRINKER_THRESHOLD	1024
+#define ZS_SHRINKER_INTERVAL	10
+
 static unsigned long zs_shrinker_count(struct shrinker *shrinker,
 		struct shrink_control *sc)
 {
@@ -2378,6 +2388,10 @@ static unsigned long zs_shrinker_count(struct shrinker *shrinker,
 	unsigned long pages_to_free = 0;
 	struct zs_pool *pool = container_of(shrinker, struct zs_pool,
 			shrinker);
+	static unsigned long time_stamp;
+
+	if (!current_is_kswapd() || time_is_after_jiffies(time_stamp))
+		return 0;
 
 	for (i = zs_size_classes - 1; i >= 0; i--) {
 		class = pool->size_class[i];
@@ -2388,6 +2402,11 @@ static unsigned long zs_shrinker_count(struct shrinker *shrinker,
 
 		pages_to_free += zs_can_compact(class);
 	}
+
+	if (pages_to_free > ZS_SHRINKER_THRESHOLD)
+		time_stamp = jiffies + (ZS_SHRINKER_INTERVAL * HZ);
+	else
+		pages_to_free = 0;
 
 	return pages_to_free;
 }
