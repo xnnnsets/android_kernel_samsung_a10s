@@ -256,7 +256,7 @@ SUBARCH := $(shell uname -m | sed -e s/i.86/x86/ -e s/x86_64/x86/ \
 # Note: Some architectures assign CROSS_COMPILE in their arch/*/Makefile
 ARCH		?= $(SUBARCH)
 # CROSS_COMPILE	?= $(CONFIG_CROSS_COMPILE:"%"=%)
-CROSS_COMPILE=/workspace/ItzKaguya-Server/gcc/bin/aarch64-linux-android-
+CROSS_COMPILE=/home/itzkaguya/aarch64-linux-android/bin/aarch64-linux-android-
 # Architecture as present in compile.h
 UTS_MACHINE 	:= $(ARCH)
 SRCARCH 	:= $(ARCH)
@@ -349,7 +349,7 @@ LD		= $(CROSS_COMPILE)ld
 endif
 LDGOLD		= $(CROSS_COMPILE)ld.gold
 # CC		= $(CROSS_COMPILE)gcc
-CC=/workspace/ItzKaguya-Server/clang/bin/clang
+CC=/home/itzkaguya/clang-9/bin/clang
 CPP		= $(CC) -E
 AR		= $(CROSS_COMPILE)ar
 NM		= $(CROSS_COMPILE)nm
@@ -516,7 +516,7 @@ endif
 ifeq ($(cc-name),clang)
 ifneq ($(CROSS_COMPILE),)
 CLANG_TRIPLE	?= $(CROSS_COMPILE)
-CLANG_TRIPLE=/workspace/ItzKaguya-Server/clang-triple/bin/aarch64-linux-gnu-
+CLANG_TRIPLE=/home/itzkaguya/aarch64-linux-gnu/bin/aarch64-linux-gnu-
 CLANG_FLAGS	+= --target=$(notdir $(CLANG_TRIPLE:%-=%))
 ifeq ($(shell $(srctree)/scripts/clang-android.sh $(CC) $(CLANG_FLAGS)), y)
 $(error "Clang with Android --target detected. Did you specify CLANG_TRIPLE?")
